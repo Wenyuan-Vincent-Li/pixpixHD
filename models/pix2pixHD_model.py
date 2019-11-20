@@ -8,42 +8,52 @@ from . import networks
 
 class Pix2PixHDModel(BaseModel):
     def name(self):
+        print("name")
         return 'Pix2PixHDModel'
     
     def init_loss_filter(self, use_gan_feat_loss, use_vgg_loss):
+        print("init_loss_filter")
         flags = (True, use_gan_feat_loss, use_vgg_loss, True, True)
         def loss_filter(g_gan, g_gan_feat, g_vgg, d_real, d_fake):
             return [l for (l,f) in zip((g_gan,g_gan_feat,g_vgg,d_real,d_fake),flags) if f]
         return loss_filter
     
     def initialize(self, opt):
+        print("initialize")
         BaseModel.initialize(self, opt)
         if opt.resize_or_crop != 'none' or not opt.isTrain: # when training at full res this causes OOM
             torch.backends.cudnn.benchmark = True
-        self.isTrain = opt.isTrain
-        self.use_features = opt.instance_feat or opt.label_feat
-        self.gen_features = self.use_features and not self.opt.load_features
-        input_nc = opt.label_nc if opt.label_nc != 0 else opt.input_nc
+        self.isTrain = opt.isTrain ## True
+        self.use_features = opt.instance_feat or opt.label_feat ## False and False
+        self.gen_features = self.use_features and not self.opt.load_features ## False False
+        input_nc = opt.label_nc if opt.label_nc != 0 else opt.input_nc ## 4
 
         ##### define networks        
         # Generator network
-        netG_input_nc = input_nc        
+        netG_input_nc = input_nc    #4
         if not opt.no_instance:
-            netG_input_nc += 1
+            netG_input_nc += 1 ## this additive channel is used for noise
         if self.use_features:
-            netG_input_nc += opt.feat_num                  
+            netG_input_nc += opt.feat_num
+
         self.netG = networks.define_G(netG_input_nc, opt.output_nc, opt.ngf, opt.netG, 
                                       opt.n_downsample_global, opt.n_blocks_global, opt.n_local_enhancers, 
-                                      opt.n_blocks_local, opt.norm, gpu_ids=self.gpu_ids)        
+                                      opt.n_blocks_local, opt.norm, gpu_ids=self.gpu_ids)
+        ## (netG_input_nc = 4, opt.output_nc = 3, opt.ngf = 64, opt.netG = "global", opt.n_downsample_global = 4,
+        # opt.n_blocks_global = 9, opt.n_local_enhancers = 1, opt.n_blocks_local = 3, opt.norm = instance normalization,
+        # gpu_ids = [0])
+        # input [4, 1200, 1200] -> [3, 1200, 1200]
 
         # Discriminator network
         if self.isTrain:
             use_sigmoid = opt.no_lsgan
-            netD_input_nc = input_nc + opt.output_nc
-            if not opt.no_instance:
+            netD_input_nc = input_nc + opt.output_nc # 4  + 3 mask + image channel
+            if not opt.no_instance: ## no instance map, why the channel increase by one?
                 netD_input_nc += 1
             self.netD = networks.define_D(netD_input_nc, opt.ndf, opt.n_layers_D, opt.norm, use_sigmoid, 
                                           opt.num_D, not opt.no_ganFeat_loss, gpu_ids=self.gpu_ids)
+            ## netD_input_nc = 8, opt.ndf = 64, opt.n_layers_D = 3, opt.norm = instance, use_sigmoid = False (use Vanilla GAN),
+            ## opt.num_D = 2, not opt.no_ganFeat_loss = True, gpu_ids = [0]
 
         ### Encoder network
         if self.gen_features:          
@@ -108,7 +118,8 @@ class Pix2PixHDModel(BaseModel):
             params = list(self.netD.parameters())    
             self.optimizer_D = torch.optim.Adam(params, lr=opt.lr, betas=(opt.beta1, 0.999))
 
-    def encode_input(self, label_map, inst_map=None, real_image=None, feat_map=None, infer=False):             
+    def encode_input(self, label_map, inst_map=None, real_image=None, feat_map=None, infer=False):
+        print("encode_input")
         if self.opt.label_nc == 0:
             input_label = label_map.data.cuda()
         else:
@@ -142,6 +153,7 @@ class Pix2PixHDModel(BaseModel):
         return input_label, inst_map, real_image, feat_map
 
     def discriminate(self, input_label, test_image, use_pool=False):
+        print("discriminator")
         input_concat = torch.cat((input_label, test_image.detach()), dim=1)
         if use_pool:            
             fake_query = self.fake_pool.query(input_concat)

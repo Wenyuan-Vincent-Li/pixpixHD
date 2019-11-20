@@ -33,14 +33,18 @@ if opt.debug:
     opt.niter_decay = 0
     opt.max_dataset_size = 10
 
-data_loader = CreateDataLoader(opt)
-dataset = data_loader.load_data()
+data_loader = CreateDataLoader(opt) ##
+dataset = data_loader.load_data() ## get pytorch data loader object
 dataset_size = len(data_loader)
 print('#training images = %d' % dataset_size)
 
+
 model = create_model(opt)
+exit()
 visualizer = Visualizer(opt)
-if opt.fp16:    
+
+
+if opt.fp16:
     from apex import amp
     model, [optimizer_G, optimizer_D] = amp.initialize(model, [model.optimizer_G, model.optimizer_D], opt_level='O1')             
     model = torch.nn.DataParallel(model, device_ids=opt.gpu_ids)

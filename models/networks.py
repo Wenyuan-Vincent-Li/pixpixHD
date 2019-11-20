@@ -25,7 +25,22 @@ def get_norm_layer(norm_type='instance'):
     return norm_layer
 
 def define_G(input_nc, output_nc, ngf, netG, n_downsample_global=3, n_blocks_global=9, n_local_enhancers=1, 
-             n_blocks_local=3, norm='instance', gpu_ids=[]):    
+             n_blocks_local=3, norm='instance', gpu_ids=[]):
+    '''
+
+    :param input_nc: input channel = 4 + 1: num of label channel + 1 noise channel
+    :param output_nc: 3 the channel of image
+    :param ngf: number of generator filters in the first conv 64
+    :param netG: "global"
+    :param n_downsample_global: number of downsampling layers in netG 4
+    :param n_blocks_global: number of residual blocks in the global generator network 9
+    :param n_local_enhancers: number of local enhancers to use 1
+    :param n_blocks_local: number of residual blocks in the local enhancer network 3
+    :param norm:  instance norm or batch norm
+    :param gpu_ids: [0]
+    :return:
+    '''
+
     norm_layer = get_norm_layer(norm_type=norm)     
     if netG == 'global':    
         netG = GlobalGenerator(input_nc, output_nc, ngf, n_downsample_global, n_blocks_global, norm_layer)       
@@ -43,7 +58,19 @@ def define_G(input_nc, output_nc, ngf, netG, n_downsample_global=3, n_blocks_glo
     netG.apply(weights_init)
     return netG
 
-def define_D(input_nc, ndf, n_layers_D, norm='instance', use_sigmoid=False, num_D=1, getIntermFeat=False, gpu_ids=[]):        
+def define_D(input_nc, ndf, n_layers_D, norm='instance', use_sigmoid=False, num_D=1, getIntermFeat=False, gpu_ids=[]):
+    '''
+
+    :param input_nc: 8 = 3(image) + 4(mask) + 1(no_instance)
+    :param ndf: 64
+    :param n_layers_D: 3
+    :param norm: instance norm
+    :param use_sigmoid:  False
+    :param num_D: 2
+    :param getIntermFeat: True
+    :param gpu_ids: [0]
+    :return:
+    '''
     norm_layer = get_norm_layer(norm_type=norm)   
     netD = MultiscaleDiscriminator(input_nc, ndf, n_layers_D, norm_layer, use_sigmoid, num_D, getIntermFeat)   
     print(netD)
@@ -183,28 +210,43 @@ class LocalEnhancer(nn.Module):
 class GlobalGenerator(nn.Module):
     def __init__(self, input_nc, output_nc, ngf=64, n_downsampling=3, n_blocks=9, norm_layer=nn.BatchNorm2d, 
                  padding_type='reflect'):
+        '''
+
+        :param input_nc: 4
+        :param output_nc: 3
+        :param ngf: 64
+        :param n_downsampling: 4
+        :param n_blocks: 9
+        :param norm_layer: instance layer
+        :param padding_type: 'reflect'
+        '''
         assert(n_blocks >= 0)
         super(GlobalGenerator, self).__init__()        
         activation = nn.ReLU(True)        
 
         model = [nn.ReflectionPad2d(3), nn.Conv2d(input_nc, ngf, kernel_size=7, padding=0), norm_layer(ngf), activation]
+        ## After padding and conv, image size remain same.
+
         ### downsample
         for i in range(n_downsampling):
             mult = 2**i
             model += [nn.Conv2d(ngf * mult, ngf * mult * 2, kernel_size=3, stride=2, padding=1),
                       norm_layer(ngf * mult * 2), activation]
+        # [64, 1200, 1200] -> [128, 600, 600] -> [256, 300, 300] -> [512, 150, 150] -> [1024, 75, 75]
 
-        ### resnet blocks
-        mult = 2**n_downsampling
+        # ### resnet blocks
+        mult = 2**n_downsampling ## 16
         for i in range(n_blocks):
             model += [ResnetBlock(ngf * mult, padding_type=padding_type, activation=activation, norm_layer=norm_layer)]
-        
-        ### upsample         
+
+        ### upsample
         for i in range(n_downsampling):
             mult = 2**(n_downsampling - i)
             model += [nn.ConvTranspose2d(ngf * mult, int(ngf * mult / 2), kernel_size=3, stride=2, padding=1, output_padding=1),
                        norm_layer(int(ngf * mult / 2)), activation]
-        model += [nn.ReflectionPad2d(3), nn.Conv2d(ngf, output_nc, kernel_size=7, padding=0), nn.Tanh()]        
+        # [1024, 75, 75] -> [512, 150, 150] -> [256, 300, 300] -> [128, 600, 600] -> [64, 1200, 1200]
+        model += [nn.ReflectionPad2d(3), nn.Conv2d(ngf, output_nc, kernel_size=7, padding=0), nn.Tanh()]
+        # [3, 1200, 1200], value map to [-1, 1]
         self.model = nn.Sequential(*model)
             
     def forward(self, input):
@@ -289,16 +331,26 @@ class Encoder(nn.Module):
                     outputs_mean[indices[:,0] + b, indices[:,1] + j, indices[:,2], indices[:,3]] = mean_feat                       
         return outputs_mean
 
-class MultiscaleDiscriminator(nn.Module):
+class MultiscaleDiscriminator(nn.Module): ## Todo: Starting from here.
     def __init__(self, input_nc, ndf=64, n_layers=3, norm_layer=nn.BatchNorm2d, 
                  use_sigmoid=False, num_D=3, getIntermFeat=False):
+        '''
+
+        :param input_nc: 8
+        :param ndf: 64
+        :param n_layers: 3
+        :param norm_layer: instance
+        :param use_sigmoid: False
+        :param num_D: 2
+        :param getIntermFeat: True
+        '''
         super(MultiscaleDiscriminator, self).__init__()
-        self.num_D = num_D
-        self.n_layers = n_layers
-        self.getIntermFeat = getIntermFeat
+        self.num_D = num_D # 2
+        self.n_layers = n_layers # 3
+        self.getIntermFeat = getIntermFeat # True
      
         for i in range(num_D):
-            netD = NLayerDiscriminator(input_nc, ndf, n_layers, norm_layer, use_sigmoid, getIntermFeat)
+            netD = NLayerDiscriminator(input_nc, ndf, n_layers, norm_layer, use_sigmoid, getIntermFeat) ## (8, 64, 3, instance, False, True)
             if getIntermFeat:                                
                 for j in range(n_layers+2):
                     setattr(self, 'scale'+str(i)+'_layer'+str(j), getattr(netD, 'model'+str(j)))                                   
@@ -331,7 +383,7 @@ class MultiscaleDiscriminator(nn.Module):
         return result
         
 # Defines the PatchGAN discriminator with the specified arguments.
-class NLayerDiscriminator(nn.Module):
+class NLayerDiscriminator(nn.Module): ## TODO: Start from here
     def __init__(self, input_nc, ndf=64, n_layers=3, norm_layer=nn.BatchNorm2d, use_sigmoid=False, getIntermFeat=False):
         super(NLayerDiscriminator, self).__init__()
         self.getIntermFeat = getIntermFeat
@@ -414,3 +466,9 @@ class Vgg19(torch.nn.Module):
         h_relu5 = self.slice5(h_relu4)                
         out = [h_relu1, h_relu2, h_relu3, h_relu4, h_relu5]
         return out
+
+if __name__ == "__main__":
+    input = torch.randn((2, 4, 1200, 1200))
+    generator = GlobalGenerator(4, 3, 64, 4, 9, nn.InstanceNorm2d)
+    output = generator(input)
+    print(output.shape)
