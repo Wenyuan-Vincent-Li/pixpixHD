@@ -18,7 +18,7 @@ class BaseOptions():
         self.parser.add_argument('--use_dropout', action='store_true', help='use dropout for the generator')
         self.parser.add_argument('--data_type', default=32, type=int, choices=[8, 16, 32], help="Supported data type i.e. 8, 16, 32 bit")
         self.parser.add_argument('--verbose', action='store_true', default=False, help='toggles verbose')
-        self.parser.add_argument('--fp16', action='store_true', default=False, help='train with AMP')
+        self.parser.add_argument('--fp16', action='store_false', default=True, help='train with AMP')
         self.parser.add_argument('--local_rank', type=int, default=0, help='local rank for distributed training')
 
         # input/output sizes       
@@ -51,7 +51,7 @@ class BaseOptions():
         self.parser.add_argument('--niter_fix_global', type=int, default=0, help='number of epochs that we only train the outmost local enhancer')        
 
         # for instance-wise features
-        self.parser.add_argument('--no_instance', action='store_true', help='if specified, do *not* add instance map as input')        
+        self.parser.add_argument('--no_instance', action='store_false', help='if specified,  add instance map as input')
         self.parser.add_argument('--instance_feat', action='store_true', help='if specified, add encoded instance features as input')
         self.parser.add_argument('--label_feat', action='store_true', help='if specified, add encoded label features as input')        
         self.parser.add_argument('--feat_num', type=int, default=3, help='vector length for encoded features')        

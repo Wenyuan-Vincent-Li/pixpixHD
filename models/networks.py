@@ -44,7 +44,9 @@ def define_G(input_nc, output_nc, ngf, netG, n_downsample_global=3, n_blocks_glo
     norm_layer = get_norm_layer(norm_type=norm)     
     if netG == 'global':    
         netG = GlobalGenerator(input_nc, output_nc, ngf, n_downsample_global, n_blocks_global, norm_layer)       
-    elif netG == 'local':        
+    elif netG == 'local':
+        print("generating local network")
+        exit()
         netG = LocalEnhancer(input_nc, output_nc, ngf, n_downsample_global, n_blocks_global, 
                                   n_local_enhancers, n_blocks_local, norm_layer)
     elif netG == 'encoder':
@@ -61,7 +63,7 @@ def define_G(input_nc, output_nc, ngf, netG, n_downsample_global=3, n_blocks_glo
 def define_D(input_nc, ndf, n_layers_D, norm='instance', use_sigmoid=False, num_D=1, getIntermFeat=False, gpu_ids=[]):
     '''
 
-    :param input_nc: 8 = 3(image) + 4(mask) + 1(no_instance)
+    :param input_nc: 8 = 3(image) + 4(mask)
     :param ndf: 64
     :param n_layers_D: 3
     :param norm: instance norm
@@ -131,6 +133,7 @@ class GANLoss(nn.Module):
                 pred = input_i[-1]
                 target_tensor = self.get_target_tensor(pred, target_is_real)
                 loss += self.loss(pred, target_tensor)
+
             return loss
         else:            
             target_tensor = self.get_target_tensor(input[-1], target_is_real)
@@ -351,8 +354,8 @@ class MultiscaleDiscriminator(nn.Module): ## Todo: Starting from here.
      
         for i in range(num_D):
             netD = NLayerDiscriminator(input_nc, ndf, n_layers, norm_layer, use_sigmoid, getIntermFeat) ## (8, 64, 3, instance, False, True)
-            if getIntermFeat:                                
-                for j in range(n_layers+2):
+            if getIntermFeat:
+                for j in range(n_layers+2): ## 0 - 5
                     setattr(self, 'scale'+str(i)+'_layer'+str(j), getattr(netD, 'model'+str(j)))                                   
             else:
                 setattr(self, 'layer'+str(i), netD.model)
@@ -369,7 +372,7 @@ class MultiscaleDiscriminator(nn.Module): ## Todo: Starting from here.
             return [model(input)]
 
     def forward(self, input):        
-        num_D = self.num_D
+        num_D = self.num_D ## 2
         result = []
         input_downsampled = input
         for i in range(num_D):
@@ -379,12 +382,21 @@ class MultiscaleDiscriminator(nn.Module): ## Todo: Starting from here.
                 model = getattr(self, 'layer'+str(num_D-1-i))
             result.append(self.singleD_forward(model, input_downsampled))
             if i != (num_D-1):
-                input_downsampled = self.downsample(input_downsampled)
+                input_downsampled = self.downsample(input_downsampled) # [8, 600, 600]
         return result
         
 # Defines the PatchGAN discriminator with the specified arguments.
 class NLayerDiscriminator(nn.Module): ## TODO: Start from here
     def __init__(self, input_nc, ndf=64, n_layers=3, norm_layer=nn.BatchNorm2d, use_sigmoid=False, getIntermFeat=False):
+        '''
+
+        :param input_nc: 7
+        :param ndf: 64
+        :param n_layers: 3
+        :param norm_layer: instance norm
+        :param use_sigmoid: False
+        :param getIntermFeat: False
+        '''
         super(NLayerDiscriminator, self).__init__()
         self.getIntermFeat = getIntermFeat
         self.n_layers = n_layers
@@ -392,6 +404,8 @@ class NLayerDiscriminator(nn.Module): ## TODO: Start from here
         kw = 4
         padw = int(np.ceil((kw-1.0)/2))
         sequence = [[nn.Conv2d(input_nc, ndf, kernel_size=kw, stride=2, padding=padw), nn.LeakyReLU(0.2, True)]]
+        # the first sequence doesn't have a norm layer
+        # ->[2, 64, 601, 601] ; [64, 301, 301]
 
         nf = ndf
         for n in range(1, n_layers):
@@ -401,6 +415,7 @@ class NLayerDiscriminator(nn.Module): ## TODO: Start from here
                 nn.Conv2d(nf_prev, nf, kernel_size=kw, stride=2, padding=padw),
                 norm_layer(nf), nn.LeakyReLU(0.2, True)
             ]]
+        # -> [128, 301, 301] -> [256, 151, 151] # -> [128, 151, 151] -> [256, 76, 76]
 
         nf_prev = nf
         nf = min(nf * 2, 512)
@@ -409,8 +424,10 @@ class NLayerDiscriminator(nn.Module): ## TODO: Start from here
             norm_layer(nf),
             nn.LeakyReLU(0.2, True)
         ]]
+        # the second last layer has stride == 1, ->[512, 152, 152] # [512, 77, 77]
 
         sequence += [[nn.Conv2d(nf, 1, kernel_size=kw, stride=1, padding=padw)]]
+        # the final layer -> [1, 153, 153] # [1, 78, 78]
 
         if use_sigmoid:
             sequence += [[nn.Sigmoid()]]
@@ -468,7 +485,9 @@ class Vgg19(torch.nn.Module):
         return out
 
 if __name__ == "__main__":
-    input = torch.randn((2, 4, 1200, 1200))
-    generator = GlobalGenerator(4, 3, 64, 4, 9, nn.InstanceNorm2d)
-    output = generator(input)
-    print(output.shape)
+    input = torch.randn((2, 8, 1200, 1200))
+    discriminator = MultiscaleDiscriminator(8, 64, 3, nn.InstanceNorm2d, False, 2, True)
+    output = discriminator(input)
+    featuremap = getattr(discriminator, 'scale'+ '0' +'_layer'+ '0') ## nn.sequential object
+    print(len(output), len(output[0]), output[0][0].shape, output[1][0].shape)
+    print(featuremap)

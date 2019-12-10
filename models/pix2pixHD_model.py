@@ -12,6 +12,12 @@ class Pix2PixHDModel(BaseModel):
         return 'Pix2PixHDModel'
     
     def init_loss_filter(self, use_gan_feat_loss, use_vgg_loss):
+        '''
+
+        :param use_gan_feat_loss: True
+        :param use_vgg_loss: True
+        :return:
+        '''
         print("init_loss_filter")
         flags = (True, use_gan_feat_loss, use_vgg_loss, True, True)
         def loss_filter(g_gan, g_gan_feat, g_vgg, d_real, d_fake):
@@ -48,7 +54,7 @@ class Pix2PixHDModel(BaseModel):
         if self.isTrain:
             use_sigmoid = opt.no_lsgan
             netD_input_nc = input_nc + opt.output_nc # 4  + 3 mask + image channel
-            if not opt.no_instance: ## no instance map, why the channel increase by one?
+            if not opt.no_instance: ## no instance map, why the channel increase by one
                 netD_input_nc += 1
             self.netD = networks.define_D(netD_input_nc, opt.ndf, opt.n_layers_D, opt.norm, use_sigmoid, 
                                           opt.num_D, not opt.no_ganFeat_loss, gpu_ids=self.gpu_ids)
@@ -56,7 +62,7 @@ class Pix2PixHDModel(BaseModel):
             ## opt.num_D = 2, not opt.no_ganFeat_loss = True, gpu_ids = [0]
 
         ### Encoder network
-        if self.gen_features:          
+        if self.gen_features: ## False
             self.netE = networks.define_G(opt.output_nc, opt.feat_num, opt.nef, 'encoder', 
                                           opt.n_downsample_E, norm=opt.norm, gpu_ids=self.gpu_ids)  
         if self.opt.verbose:
@@ -75,24 +81,23 @@ class Pix2PixHDModel(BaseModel):
         if self.isTrain:
             if opt.pool_size > 0 and (len(self.gpu_ids)) > 1:
                 raise NotImplementedError("Fake Pool Not Implemented for MultiGPU")
-            self.fake_pool = ImagePool(opt.pool_size)
-            self.old_lr = opt.lr
+            self.fake_pool = ImagePool(opt.pool_size) ## opt.pool_size = 0
+            self.old_lr = opt.lr ## 0.0002
 
             # define loss functions
             self.loss_filter = self.init_loss_filter(not opt.no_ganFeat_loss, not opt.no_vgg_loss)
-            
-            self.criterionGAN = networks.GANLoss(use_lsgan=not opt.no_lsgan, tensor=self.Tensor)   
+            self.criterionGAN = networks.GANLoss(use_lsgan=not opt.no_lsgan, tensor=self.Tensor)
             self.criterionFeat = torch.nn.L1Loss()
-            if not opt.no_vgg_loss:             
+            if not opt.no_vgg_loss:
                 self.criterionVGG = networks.VGGLoss(self.gpu_ids)
                 
         
             # Names so we can breakout loss
-            self.loss_names = self.loss_filter('G_GAN','G_GAN_Feat','G_VGG','D_real', 'D_fake')
+            self.loss_names = self.loss_filter('G_GAN', 'G_GAN_Feat', 'G_VGG', 'D_real', 'D_fake')
 
             # initialize optimizers
             # optimizer G
-            if opt.niter_fix_global > 0:                
+            if opt.niter_fix_global > 0: # niter_fix_global 'number of epochs that we only train the outmost local enhancer' defaut 0 no enhancer network is using
                 import sys
                 if sys.version_info >= (3,0):
                     finetune_list = set()
@@ -109,10 +114,12 @@ class Pix2PixHDModel(BaseModel):
                 print('------------- Only training the local enhancer network (for %d epochs) ------------' % opt.niter_fix_global)
                 print('The layers that are finetuned are ', sorted(finetune_list))                         
             else:
-                params = list(self.netG.parameters())
-            if self.gen_features:              
-                params += list(self.netE.parameters())         
-            self.optimizer_G = torch.optim.Adam(params, lr=opt.lr, betas=(opt.beta1, 0.999))                            
+                params = list(self.netG.parameters()) ## default setting there is no enhancer network
+
+            if self.gen_features:
+                params += list(self.netE.parameters())
+
+            self.optimizer_G = torch.optim.Adam(params, lr=opt.lr, betas=(opt.beta1, 0.999))
 
             # optimizer D                        
             params = list(self.netD.parameters())    
@@ -150,33 +157,38 @@ class Pix2PixHDModel(BaseModel):
             if self.opt.label_feat:
                 inst_map = label_map.cuda()
 
-        return input_label, inst_map, real_image, feat_map
+        return input_label, inst_map, real_image, feat_map ## [1, 4, 1024, 1024], [1], [1, 3, 1024, 1024], [1]
 
     def discriminate(self, input_label, test_image, use_pool=False):
         print("discriminator")
-        input_concat = torch.cat((input_label, test_image.detach()), dim=1)
+        input_concat = torch.cat((input_label, test_image.detach()), dim=1) # [1, 7, 1024, 1024]
         if use_pool:            
-            fake_query = self.fake_pool.query(input_concat)
+            fake_query = self.fake_pool.query(input_concat) # [1, 7, 1024, 1024]
             return self.netD.forward(fake_query)
         else:
             return self.netD.forward(input_concat)
 
     def forward(self, label, inst, image, feat, infer=False):
         # Encode Inputs
-        input_label, inst_map, real_image, feat_map = self.encode_input(label, inst, image, feat)  
-
+        input_label, inst_map, real_image, feat_map = self.encode_input(label, inst, image, feat) ## encode_input
+        ## input_label [1, 4, 1024, 1024] inst_map [[1]] real_image [1, 3, 1024, 1024] feat_map [1]
         # Fake Generation
+
         if self.use_features:
             if not self.opt.load_features:
                 feat_map = self.netE.forward(real_image, inst_map)                     
             input_concat = torch.cat((input_label, feat_map), dim=1)                        
         else:
-            input_concat = input_label
-        fake_image = self.netG.forward(input_concat)
+            input_concat = input_label # [1, 4, 1024, 1024]
+        fake_image = self.netG.forward(input_concat) # [1, 3, 1024, 1024] ## there is no noise involving in this process
 
         # Fake Detection and Loss
         pred_fake_pool = self.discriminate(input_label, fake_image, use_pool=True)
-        loss_D_fake = self.criterionGAN(pred_fake_pool, False)        
+
+        # len(pred_fake_pool) = 2: there are two discriminator; len(pred_fake_pool[0]) = 5: there are five layers/output in each layers.
+
+        loss_D_fake = self.criterionGAN(pred_fake_pool, False) # scalar: patch GAN with MSE loss
+
 
         # Real Detection and Loss        
         pred_real = self.discriminate(input_label, real_image)
@@ -195,14 +207,15 @@ class Pix2PixHDModel(BaseModel):
                 for j in range(len(pred_fake[i])-1):
                     loss_G_GAN_Feat += D_weights * feat_weights * \
                         self.criterionFeat(pred_fake[i][j], pred_real[i][j].detach()) * self.opt.lambda_feat
-                   
+
         # VGG feature matching loss
         loss_G_VGG = 0
         if not self.opt.no_vgg_loss:
             loss_G_VGG = self.criterionVGG(fake_image, real_image) * self.opt.lambda_feat
-        
+
+        ## TODO: disable vgg loss
         # Only return the fake_B image if necessary to save BW
-        return [ self.loss_filter( loss_G_GAN, loss_G_GAN_Feat, loss_G_VGG, loss_D_real, loss_D_fake ), None if not infer else fake_image ]
+        return [self.loss_filter( loss_G_GAN, loss_G_GAN_Feat, loss_G_VGG, loss_D_real, loss_D_fake ), None if not infer else fake_image ]
 
     def inference(self, label, inst, image=None):
         # Encode Inputs        

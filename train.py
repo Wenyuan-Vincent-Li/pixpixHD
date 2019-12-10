@@ -40,7 +40,6 @@ print('#training images = %d' % dataset_size)
 
 
 model = create_model(opt)
-exit()
 visualizer = Visualizer(opt)
 
 
@@ -57,10 +56,13 @@ display_delta = total_steps % opt.display_freq
 print_delta = total_steps % opt.print_freq
 save_delta = total_steps % opt.save_latest_freq
 
+
 for epoch in range(start_epoch, opt.niter + opt.niter_decay + 1):
+    print(opt.niter + opt.niter_decay + 1)
     epoch_start_time = time.time()
     if epoch != start_epoch:
         epoch_iter = epoch_iter % dataset_size
+
     for i, data in enumerate(dataset, start=epoch_iter):
         if total_steps % opt.print_freq == print_delta:
             iter_start_time = time.time()
@@ -73,14 +75,17 @@ for epoch in range(start_epoch, opt.niter + opt.niter_decay + 1):
         ############## Forward Pass ######################
         losses, generated = model(Variable(data['label']), Variable(data['inst']), 
             Variable(data['image']), Variable(data['feat']), infer=save_fake)
+        ## data['label'] [1, 1024, 1024]; data['image'] [3, 1024, 1024]
 
         # sum per device losses
-        losses = [ torch.mean(x) if not isinstance(x, int) else x for x in losses ]
+        losses = [torch.mean(x) if not isinstance(x, int) else x for x in losses]
         loss_dict = dict(zip(model.module.loss_names, losses))
+        print(losses)
+        exit()
 
         # calculate final loss scalar
         loss_D = (loss_dict['D_fake'] + loss_dict['D_real']) * 0.5
-        loss_G = loss_dict['G_GAN'] + loss_dict.get('G_GAN_Feat',0) + loss_dict.get('G_VGG',0)
+        loss_G = loss_dict['G_GAN'] + loss_dict.get('G_GAN_Feat', 0) + loss_dict.get('G_VGG', 0)
 
         ############### Backward Pass ####################
         # update generator weights
